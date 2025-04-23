@@ -1,3 +1,6 @@
-﻿# tareas-programacion-3
-Alessandro Cristian Budini Conejeros
-Programacion 3 Seccion 2
+echo "# tarea2-programacion-3" >> README.md
+git init
+git add README.md
+git commit -m "first commit"
+git branch -M main
+git remote add origin https:
