@@ -1,13 +1,12 @@
 from fastapi import FastAPI, Depends, HTTPException
 from sqlalchemy.orm import Session
-from database import SessionLocal, engine
-import models, shemas
-from cola import Cola
+from database import SessionLocal, engine, Base 
+from models import Vuelo
+from flight_list import ListaDoblementeEnlazada
 
-models.Base.metadata.create_all(bind=engine)
-
+Base.metadata.create_all(bind=engine)
 app = FastAPI()
-cola_misiones = {}
+lista = ListaDoblementeEnlazada()
 
 def get_db():
     db = SessionLocal()
@@ -16,74 +15,44 @@ def get_db():
     finally:
         db.close()
 
-@app.post("/personajes")
-def registrar_personaje(personaje: shemas.PersonajeCreate, db: Session = Depends(get_db)):
-    nuevo = models.Personaje(nombre=personaje.nombre)
-    db.add(nuevo)
+@app.post("/vuelos/")
+def crear_vuelo(codigo: str, destino: str, prioridad: str, db: Session = Depends(get_db)):
+    vuelo = Vuelo(codigo=codigo, destino=destino, prioridad=prioridad)
+    db.add(vuelo)
     db.commit()
-    db.refresh(nuevo)
-    cola_misiones[nuevo.id] = Cola()
-    return nuevo
+    db.refresh(vuelo)
 
-@app.post("/misiones")
-def crear_mision(mision: shemas.MisionCreate, db: Session = Depends(get_db)):
-    nueva = models.Mision(**mision.dict())
-    db.add(nueva)
-    db.commit()
-    db.refresh(nueva)
-    return nueva
+    if prioridad == "emergencia":
+        lista.insertar_al_frente(vuelo)
+    elif prioridad == "demorado":
+        lista.insertar_en_posicion(vuelo, 1)
+    else:
+        lista.insertar_al_final(vuelo)
+    return vuelo
 
-@app.post("/personajes/{personaje_id}/misiones/{mision_id}")
-def aceptar_mision(personaje_id: int, mision_id: int, db: Session = Depends(get_db)):
-    personaje = db.query(models.Personaje).get(personaje_id)
-    mision = db.query(models.Mision).get(mision_id)
-    if not personaje or not mision:
-        raise HTTPException(status_code=404, detail="Personaje o Misión no encontrada")
-    
-    personaje.misiones.append(mision)
-    db.commit()
+@app.get("/vuelos/primero")
+def ver_primero():
+    vuelo = lista.obtener_primero()
+    if vuelo:
+        return vuelo
+    raise HTTPException(status_code=404, detail="No hay vuelos")
 
-    if personaje_id not in cola_misiones:
-        cola_misiones[personaje_id] = Cola()
-    
-    cola_misiones[personaje_id].enqueue(mision.id)
-    return {"mensaje": "Misión encolada"}
+@app.get("/vuelos/ultimo")
+def ver_ultimo():
+    vuelo = lista.obtener_ultimo()
+    if vuelo:
+        return vuelo
+    raise HTTPException(status_code=404, detail="No hay vuelos")
 
-@app.post("/personajes/{personaje_id}/completar")
-def completar_mision(personaje_id: int, db: Session = Depends(get_db)):
-    personaje = db.query(models.Personaje).get(personaje_id)
-    if not personaje:
-        raise HTTPException(status_code=404, detail="Personaje no encontrado")
+@app.get("/vuelos/longitud")
+def obtener_longitud():
+    return {"total": lista.longitud()}
 
-    cola = cola_misiones.get(personaje_id)
-    if cola is None:
-        raise HTTPException(status_code=400, detail="Este personaje no tiene misiones activas")
-
-    mision_id = cola.dequeue()
-    if mision_id is None:
-        return {"mensaje": "No hay misiones para completar"}
-
-    mision = db.query(models.Mision).get(mision_id)
-    if not mision:
-        return {"mensaje": "La misión ya no existe"}
-
-    personaje.experiencia += mision.xp
-    personaje.misiones.remove(mision)
-    db.commit()
-    return {"mensaje": "Misión completada", "xp_ganada": mision.xp}
-
-@app.get("/personajes/{personaje_id}/misiones")
-def listar_misiones(personaje_id: int, db: Session = Depends(get_db)):
-    cola = cola_misiones.get(personaje_id)
-    if cola is None:
-        raise HTTPException(status_code=404, detail="Este personaje no tiene misiones activas")
-
-    misiones = []
-    for m_id in cola.items:
-        mision = db.query(models.Mision).get(m_id)
-        if mision:
-            misiones.append(mision.descripcion)
-    return misiones
+@app.delete("/vuelos/{posicion}")
+def eliminar_vuelo(posicion: int):
+    vuelo = lista.extraer_de_posicion(posicion)
+    if vuelo:
+        return vuelo
+    raise HTTPException(status_code=404, detail="Posición inválida")
 
 #python -m uvicorn main:app --reload
-#python -m uvicorn main:app --reload --debug
